@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from torch import optim
@@ -59,6 +60,7 @@ def train(model, num_epochs, dataloader, device):
     model.train()
     loss_func = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+    loss_history = {}
     for epoch in range(num_epochs):
         losses = 0.0
         for (images, labels) in dataloader:
@@ -70,6 +72,19 @@ def train(model, num_epochs, dataloader, device):
             optimizer.step()
             losses += loss.item()
         print(f'[{epoch + 1}/{num_epochs}] loss: {losses / len(dataloader)}')
+        loss_history[epoch] = losses
+    return loss_history
+
+
+def plot_training_loss(loss_history):
+    epochs, losses = loss_history.keys(), loss_history.values()
+    plt.plot(epochs, losses, 'g', label='Training loss')
+    plt.title('Training loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.show()
+
 
 def test(model, dataloader, device):
     model.eval()
@@ -97,10 +112,11 @@ if __name__ == '__main__':
         num_workers=2
     )
     
-    num_epochs = 1
-    train(net, num_epochs, trainloader, device)
+    num_epochs = 10
+    loss_history = train(net, num_epochs, trainloader, device)
+    plot_training_loss(loss_history)
 
-    model_path = './cifar_net.pth'
+    model_path = './minst_net.pth'
     torch.save(net.state_dict(), model_path)
 
     test(net, testloader, device)
