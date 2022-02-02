@@ -1,3 +1,5 @@
+import os
+import argparse
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -5,6 +7,7 @@ from torch import optim
 from torchvision import datasets
 from torchvision.transforms import ToTensor, Normalize, Compose
 from torch.utils.data import DataLoader
+from datetime import datetime
 
 
 class MinstCNN(nn.Module):
@@ -56,7 +59,7 @@ def get_dataloader(dataset, batch_size, num_workers):
     shuffle = True
     return DataLoader(dataset, batch_size, shuffle, num_workers=num_workers)
 
-def train(model, num_epochs, dataloader, device):
+def train(model, num_epochs, dataloader, device, output_dir):
     model.train()
     loss_func = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
@@ -73,8 +76,10 @@ def train(model, num_epochs, dataloader, device):
             losses += loss.item()
         print(f'[{epoch + 1}/{num_epochs}] loss: {losses / len(dataloader)}')
         loss_history[epoch] = losses
+        now = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+        model_path = f'{output_dir}/minstModel_l{losses}_{now}.pth'
+        torch.save(model.state_dict(), model_path)
     return loss_history
-
 
 def plot_training_loss(loss_history):
     epochs, losses = loss_history.keys(), loss_history.values()
@@ -84,7 +89,6 @@ def plot_training_loss(loss_history):
     plt.ylabel('Loss')
     plt.legend()
     plt.show()
-
 
 def test(model, dataloader, device):
     model.eval()
@@ -100,9 +104,22 @@ def test(model, dataloader, device):
         accuracy = 100 * correct / total
         print(f'Test Accuracy of the model on the test images: {accuracy:.1f}')
 
-
 if __name__ == '__main__':
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--model', help='path to saved model')
+    ap.add_argument('-o', '--output', help='output directory', default='.')
+
+    args = vars(ap.parse_args())
+    output_dir = args['output']
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     net = MinstCNN()
+
+    if args['model']:
+        print(f'Loading model from {args["model"]}')
+        net.load_state_dict(torch.load(args["model"]))
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net = net.to(device)
 
@@ -113,10 +130,10 @@ if __name__ == '__main__':
     )
     
     num_epochs = 10
-    loss_history = train(net, num_epochs, trainloader, device)
+    loss_history = train(net, num_epochs, trainloader, device, output_dir)
     plot_training_loss(loss_history)
 
-    model_path = './minst_net.pth'
+    model_path = f'{output_dir}/minst_net.pth'
     torch.save(net.state_dict(), model_path)
 
     test(net, testloader, device)
