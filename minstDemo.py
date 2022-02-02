@@ -4,60 +4,11 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from torch import optim
-from torchvision import datasets
-from torchvision.transforms import ToTensor, Normalize, Compose
-from torch.utils.data import DataLoader
 from datetime import datetime
 
+from MinstModel import MinstCNN
+from MinstData import MinstDataset
 
-class MinstCNN(nn.Module):
-    def __init__(self):
-        super(MinstCNN, self).__init__()
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(
-                in_channels=1,
-                out_channels=16,
-                kernel_size=5,
-                stride=1,
-                padding=2,
-            ),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(
-                in_channels=16,
-                out_channels=32,
-                kernel_size=5,
-                stride=1,
-                padding=2,
-            ),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),
-        )
-        self.out = nn.Linear(32 * 7 * 7, 10)
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = x.view(x.size(0), -1)
-        return self.out(x)
-
-
-def prepare_dataloaders(data_path, batch_size, num_workers):
-    transform = Compose([ToTensor(), Normalize((0.5), (0.5)) ])
-    trainset = get_minst_dataset(data_path, transform, train=True)
-    trainloader = get_dataloader(trainset, batch_size, num_workers)
-    testset = get_minst_dataset(data_path, transform, train=False)
-    testloader = get_dataloader(testset, batch_size, num_workers)
-    return trainloader, testloader
-
-def get_minst_dataset(data_path, transform, train):
-    return datasets.MNIST(data_path, train, transform, download=True)
-
-def get_dataloader(dataset, batch_size, num_workers):
-    shuffle = True
-    return DataLoader(dataset, batch_size, shuffle, num_workers=num_workers)
 
 def train(model, num_epochs, dataloader, device, output_dir):
     model.train()
@@ -104,30 +55,39 @@ def test(model, dataloader, device):
         accuracy = 100 * correct / total
         print(f'Test Accuracy of the model on the test images: {accuracy:.1f}')
 
-if __name__ == '__main__':
+def parse_argument():
     ap = argparse.ArgumentParser()
     ap.add_argument('--model', help='path to saved model')
     ap.add_argument('-o', '--output', help='output directory', default='.')
+    return vars(ap.parse_args())
 
-    args = vars(ap.parse_args())
+def create_dir_if_not_exists(dir_path):
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
+
+def get_model(model_path=None):
+    model = MinstCNN()
+    if model_path is not None and os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path))
+        print(f'Loaded model from {model_path}')
+    return model
+
+if __name__ == '__main__':
+    args = parse_argument()
     output_dir = args['output']
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
 
-    net = MinstCNN()
-
-    if args['model']:
-        print(f'Loading model from {args["model"]}')
-        net.load_state_dict(torch.load(args["model"]))
+    create_dir_if_not_exists(output_dir)
+    net = get_model(args['model'])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net = net.to(device)
 
-    trainloader, testloader = prepare_dataloaders(
+    dataset = MinstDataset(
         data_path='./data',
         batch_size=24,
         num_workers=2
     )
+    trainloader = dataset.get_trainloder()
     
     num_epochs = 10
     loss_history = train(net, num_epochs, trainloader, device, output_dir)
@@ -136,4 +96,5 @@ if __name__ == '__main__':
     model_path = f'{output_dir}/minst_net.pth'
     torch.save(net.state_dict(), model_path)
 
+    testloader = dataset.get_testloder()
     test(net, testloader, device)
