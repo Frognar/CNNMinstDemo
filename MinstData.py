@@ -10,7 +10,7 @@ class MinstDataset():
         self.num_workers = num_workers
         self.transform = Compose([ToTensor(), Normalize((0.5), (0.5))])
 
-    def get_trainloder(self):
+    def get_trainloader(self):
         return self.get_dataloader(
             datasets.MNIST(
                 self.data_path,
@@ -20,7 +20,7 @@ class MinstDataset():
             )
         )
 
-    def get_testloder(self):
+    def get_testloader(self):
         return self.get_dataloader(
             datasets.MNIST(
                 self.data_path,
