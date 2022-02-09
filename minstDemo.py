@@ -12,58 +12,38 @@ from MinstData import MinstDataset
 
 def parse_argument():
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        '--checkpoint',
-        type=str,
-        default=None,
-        help='Path to checkpoint'
-    )
-    ap.add_argument(
-        '--model',
-        type=str,
-        default=None,
-        help='path to saved model'
-    )
-    ap.add_argument(
-        '--checkpoint_output',
-        type=str,
-        default='./checkpoints',
-        help='checkpoint output directory'
-    )
-    ap.add_argument(
-        '-o', '--output',
-        type=str,
-        default='./',
-        help='output directory'
-    )
+    ap.add_argument('--checkpoint', default=None, help='Path to checkpoint')
+    ap.add_argument('-o', '--output', default='./', help='output directory')
     return vars(ap.parse_args())
 
 def create_dir_if_not_exists(dir_path):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
-def load_checkpoint(checkpoint_path, model, optimizer):
-    if checkpoint_path is None or not os.path.exists(checkpoint_path):
+def load_checkpoint(checkpoint_path):
+    if not os.path.exists(checkpoint_path):
         raise ValueError(f'Checkpoint path {checkpoint_path} does not exist')
+    return torch.load(checkpoint_path)
 
-    checkpoint = torch.load(checkpoint_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    last_epoch = checkpoint['last_epoch']
-    loss_history = checkpoint['loss_history']
-    return last_epoch, loss_history
+def save_checkpoint(out_dir, epoch, loss, accuracy, model, optimizer):
+    create_dir_if_not_exists(out_dir)
+    now = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+    torch.save({
+            'epoch': epoch,
+            'loss': loss,
+            'accuracy': accuracy,
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+        },
+        f'{out_dir}/checkpoint_e{epoch}_{now}.pth'
+    )
 
-def train(model, loss_func, optimizer, epochs,
-        dataloader, checkpoint_dir, last_epoch, loss_history):
+def save_model(model, out_dir):
+    create_dir_if_not_exists(out_dir)
+    torch.save(model.state_dict(), f'{out_dir}/model.pth')
+
+def train(model, dataloader, loss_func, optimizer):
     model.train()
-    end_epoch = last_epoch + epochs
-    for epoch in range(last_epoch + 1, end_epoch + 1):
-        loss = process_epoch(model, dataloader, loss_func, optimizer)
-        loss_history[epoch] = loss
-        save_checkpoint(checkpoint_dir, model, optimizer, epoch, loss_history)
-        print(f'[{epoch}/{end_epoch}] loss: {loss:.4f}')
-
-def process_epoch(model, dataloader, loss_func, optimizer):
     epoch_loss = 0.0
     for images, labels in dataloader:
         optimizer.zero_grad()
@@ -73,30 +53,6 @@ def process_epoch(model, dataloader, loss_func, optimizer):
         optimizer.step()
         epoch_loss += loss.item()
     return epoch_loss
-
-def save_checkpoint(checkpoint_dir, model, optimizer, last_epoch, loss_history):
-    torch.save({
-        'last_epoch': last_epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'loss_history': loss_history
-    }, name_checkpoint(checkpoint_dir, last_epoch))
-
-def name_checkpoint(output_dir, last_epoch):
-    now = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
-    return f'{output_dir}/checkpoint_e{last_epoch}_{now}.pth'
-
-def plot_training_loss(loss_history):
-    epochs, losses = loss_history.keys(), loss_history.values()
-    plt.plot(epochs, losses, 'g', label='Training loss')
-    plt.title('Training loss')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.show()
-
-def save_model(model, model_path):
-    torch.save(model.state_dict(), model_path)
 
 def test(model, dataloader):
     model.eval()
@@ -109,16 +65,24 @@ def test(model, dataloader):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
         accuracy = 100 * correct / total
-        print(f'Test Accuracy of the model on the test images: {accuracy:.1f}')
+        return accuracy
+
+def plot_training_history(epoch, losses, accuracies):
+    epochs = [i for i in range(1, epoch + 1)]
+    fig, ax1 = plt.subplots()
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('Loss', color='r')
+    ax1.plot(epochs, losses, color='r', label='Loss')
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Accuracy', color='b')
+    ax2.plot(epochs, accuracies, color='b', label='Accuracy')
+    fig.tight_layout()
+    plt.show()
 
 if __name__ == '__main__':
     args = parse_argument()
-    checkpoint = args['checkpoint']
-    model_path = args['model']
-    checkpoint_output_dir = args['checkpoint_output']
-    output_dir = args['output']
-    create_dir_if_not_exists(output_dir)
-    create_dir_if_not_exists(checkpoint_output_dir)
+    checkpoint_path = args['checkpoint']
+    out_dir = args['output']
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dataset = MinstDataset('./data', device, batch_size=24, num_workers=2)
@@ -129,15 +93,28 @@ if __name__ == '__main__':
     model = model.to(device)
     loss_func = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-    last_epoch = 0
-    loss_history = {}
 
-    if checkpoint is not None:
-        last_epoch, loss_history = load_checkpoint(checkpoint, model, optimizer)
+    last_epoch = 0
+    losses = []
+    accuracies = []
+    if checkpoint_path is not None:
+        checkpoint = load_checkpoint(checkpoint_path)
+        last_epoch = checkpoint['epoch']
+        losses = checkpoint['loss']
+        accuracies = checkpoint['accuracy']
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
 
     epochs = 10
-    train(model, loss_func, optimizer, epochs, trainloader,
-        checkpoint_output_dir, last_epoch, loss_history)
-    plot_training_loss(loss_history)
-    save_model(model, f'{output_dir}/model.pth')
-    test(model, testloader)
+    end_epoch = last_epoch + epochs
+    for epoch in range(last_epoch + 1, end_epoch + 1):
+        loss = train(model, trainloader, loss_func, optimizer)
+        accuracy = test(model, testloader)
+        last_epoch = epoch
+        losses.append(loss)
+        accuracies.append(accuracy)
+        save_checkpoint(out_dir, epoch, losses, accuracies, model, optimizer)
+        print(f'[{epoch}/{end_epoch}] loss: {loss:.4f} accuracy: {accuracy}')
+
+    plot_training_history(last_epoch, losses, accuracies)
+    save_model(model, out_dir)
